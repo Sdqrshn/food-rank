@@ -7,8 +7,7 @@ from rest_framework import viewsets
 from .models import Category, Dish, PlacesUsage, ToEatItem, get_uncategorized
 from django.db.models import F, Sum
 from .serializers import (
-    CategorySerializer, DishSerializer, SignupSerializer, LoginSerializer,
-    ProfileSerializer, ChangePasswordSerializer, SearchResultSerializer, ToEatSerializer
+    CategorySerializer, DishSerializer, ProfileSerializer, SearchResultSerializer, ToEatSerializer
 )
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, action, permission_classes
@@ -151,37 +150,6 @@ def user_data(user):
     return {"id": user.id, "email": user.username, "display_name": user.first_name}
 
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def signup(request):
-    serializer = SignupSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    data = serializer.validated_data
-    user = User.objects.create_user(
-        username=data["email"],
-        email=data["email"],
-        password=data["password"],
-        first_name=data["display_name"],
-    )
-    token, _ = Token.objects.get_or_create(user=user)
-    return Response({"token": token.key, "user": user_data(user)}, status=201)
-
-
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def login_view(request):
-    serializer = LoginSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    user = authenticate(
-        username=serializer.validated_data["email"].strip().lower(),
-        password=serializer.validated_data["password"],
-    )
-    if user is None:
-        return Response({"error": "Wrong email or password."}, status=400)
-    token, _ = Token.objects.get_or_create(user=user)
-    return Response({"token": token.key, "user": user_data(user)})
-
-
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def me(request):
@@ -199,27 +167,6 @@ def logout_view(request):
     Token.objects.filter(user=request.user).delete()
     return Response({"ok": True})
 
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def change_password(request):
-    serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
-    serializer.is_valid(raise_exception=True)
-    if not request.user.check_password(serializer.validated_data["current_password"]):
-        return Response({"current_password": ["That is not your current password."]}, status=400)
-    request.user.set_password(serializer.validated_data["new_password"])
-    request.user.save()
-    Token.objects.filter(user=request.user).delete()
-    token = Token.objects.create(user=request.user)
-    return Response({"token": token.key})
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def delete_account(request):
-    password = request.data.get("password", "")
-    if not request.user.check_password(password):
-        return Response({"password": ["Incorrect password."]}, status=400)
-    request.user.delete()
-    return Response({"ok": True})
 
 @api_view(["GET"])
 @permission_classes([AllowAny])

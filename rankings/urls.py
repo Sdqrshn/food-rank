@@ -10,12 +10,8 @@ router.register("to-eat", views.ToEatViewSet, basename="to-eat")
 urlpatterns = [
     path("hello/", views.hello),
     path("", include(router.urls)),
-    path("auth/signup/", views.signup),
-    path("auth/login/", views.login_view),
     path("auth/me/", views.me),
     path("auth/logout/", views.logout_view),
-    path("auth/change-password/", views.change_password),
-    path("auth/delete-account/", views.delete_account),
     path("auth/google/", views.google_login),
     path("auth/delete-summary/", views.delete_summary),
     path("auth/delete/", views.delete_me),

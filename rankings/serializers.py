@@ -86,49 +86,9 @@ class DishSerializer(serializers.ModelSerializer):
         return data
     
 
-class SignupSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-    display_name = serializers.CharField(max_length=50)
-
-    def validate_email(self, value):
-        value = value.strip().lower()
-        if User.objects.filter(username=value).exists():
-            raise serializers.ValidationError("An account with this email already exists.")
-        return value
-
-    def validate_display_name(self, value):
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Enter a display name.")
-        return value
-
-    def validate_password(self, value):
-        try:
-            password_validation.validate_password(value)
-        except DjangoValidationError as error:
-            raise serializers.ValidationError(list(error.messages))
-        return value
-
-
-class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-
 class ProfileSerializer(serializers.Serializer):
     display_name = serializers.CharField(max_length=50)
 
-
-class ChangePasswordSerializer(serializers.Serializer):
-    current_password = serializers.CharField(write_only=True)
-    new_password = serializers.CharField(write_only=True)
-
-    def validate_new_password(self, value):
-        try:
-            password_validation.validate_password(value, self.context["request"].user)
-        except DjangoValidationError as error:
-            raise serializers.ValidationError(list(error.messages))
-        return value
 
 def make_snippet(text, query, radius=22):
     index = text.lower().find(query.lower()) if query else -1
