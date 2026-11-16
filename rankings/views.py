@@ -150,9 +150,7 @@ class DishViewSet(viewsets.ModelViewSet):
 def get_profile(user):
     return Profile.objects.get_or_create(user=user)[0]
 
-
-def photo_url(user):
-    profile = get_profile(user)
+def photo_url(profile):
     if profile.photo:
         return profile.photo.url
     if profile.use_google_photo and profile.google_photo:
@@ -161,11 +159,13 @@ def photo_url(user):
 
 
 def user_data(user):
+    profile = get_profile(user)
     return {
         "id": user.id,
         "email": user.username,
         "display_name": user.first_name,
-        "photo": photo_url(user),
+        "photo": photo_url(profile),
+        "welcomed": profile.welcomed,
     }
 
 @api_view(["GET", "PATCH"])
@@ -339,17 +339,22 @@ def google_login(request):
         return Response({"error": "Your Google email isn't verified."}, status=400)
 
     user = User.objects.filter(username=email).first() or User.objects.filter(email__iexact=email).first()
+    created = False
     if user is None:
         name = (info.get("name") or email.split("@")[0]).strip()[:50]
         user = User.objects.create_user(username=email, email=email, first_name=name)
+        created = True
     if not user.is_active:
         return Response({"error": "This account is disabled."}, status=400)
 
-    picture = (info.get("picture") or "").replace("=s96-c", "=s256-c")
     profile = get_profile(user)
-    if picture and profile.google_photo != picture:
+    if created:
+        profile.welcomed = False
+    picture = (info.get("picture") or "").replace("=s96-c", "=s256-c")
+    if picture:
         profile.google_photo = picture
-        profile.save(update_fields=["google_photo"])
+    profile.save()
+
     token, _ = Token.objects.get_or_create(user=user)
     return Response({"token": token.key, "user": user_data(user)})
 
@@ -395,4 +400,18 @@ def profile_photo(request):
         profile.photo = None
         profile.use_google_photo = False
         profile.save()
+    return Response(user_data(request.user))
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def welcome_done(request):
+    name = (request.data.get("display_name") or "").strip()
+    if name:
+        if len(name) > 50:
+            return Response({"display_name": ["Keep it under 50 characters."]}, status=400)
+        request.user.first_name = name
+        request.user.save(update_fields=["first_name"])
+    profile = get_profile(request.user)
+    profile.welcomed = True
+    profile.save(update_fields=["welcomed"])
     return Response(user_data(request.user))

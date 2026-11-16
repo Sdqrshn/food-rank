@@ -88,6 +88,7 @@ class Profile(models.Model):
     photo = models.ImageField(upload_to="profiles/", null=True, blank=True)
     google_photo = models.URLField(max_length=500, blank=True)
     use_google_photo = models.BooleanField(default=True)
+    welcomed = models.BooleanField(default=True)
 
 @receiver(post_delete, sender=Profile)
 def delete_profile_photo(sender, instance, **kwargs):
