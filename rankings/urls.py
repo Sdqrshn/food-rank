@@ -11,6 +11,7 @@ urlpatterns = [
     path("hello/", views.hello),
     path("", include(router.urls)),
     path("auth/me/", views.me),
+    path("auth/photo/", views.profile_photo),
     path("auth/logout/", views.logout_view),
     path("auth/google/", views.google_login),
     path("auth/delete-summary/", views.delete_summary),

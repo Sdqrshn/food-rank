@@ -3,16 +3,17 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.db import connection
 from django.db.models import Q
-from rest_framework import viewsets
-from .models import Category, Dish, PlacesUsage, ToEatItem, get_uncategorized
 from django.db.models import F, Sum
+from .models import Category, Dish, PlacesUsage, ToEatItem, get_uncategorized, Profile
 from .serializers import (
     CategorySerializer, DishSerializer, ProfileSerializer, SearchResultSerializer, ToEatSerializer
 )
+from rest_framework import viewsets
 from rest_framework.authtoken.models import Token
-from rest_framework.decorators import api_view, action, permission_classes
+from rest_framework.decorators import api_view, action, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.parsers import FormParser, MultiPartParser
 from . import placing
 import os
 import requests
@@ -146,9 +147,26 @@ class DishViewSet(viewsets.ModelViewSet):
         placing.apply_order(category, ids)
         return Response({"ok": True})
 
-def user_data(user):
-    return {"id": user.id, "email": user.username, "display_name": user.first_name}
+def get_profile(user):
+    return Profile.objects.get_or_create(user=user)[0]
 
+
+def photo_url(user):
+    profile = get_profile(user)
+    if profile.photo:
+        return profile.photo.url
+    if profile.use_google_photo and profile.google_photo:
+        return profile.google_photo
+    return None
+
+
+def user_data(user):
+    return {
+        "id": user.id,
+        "email": user.username,
+        "display_name": user.first_name,
+        "photo": photo_url(user),
+    }
 
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
@@ -327,6 +345,11 @@ def google_login(request):
     if not user.is_active:
         return Response({"error": "This account is disabled."}, status=400)
 
+    picture = (info.get("picture") or "").replace("=s96-c", "=s256-c")
+    profile = get_profile(user)
+    if picture and profile.google_photo != picture:
+        profile.google_photo = picture
+        profile.save(update_fields=["google_photo"])
     token, _ = Token.objects.get_or_create(user=user)
     return Response({"token": token.key, "user": user_data(user)})
 
@@ -350,3 +373,26 @@ def delete_me(request):
         return Response({"error": "Confirmation is required."}, status=400)
     request.user.delete()
     return Response({"ok": True})
+
+@api_view(["POST", "DELETE"])
+@parser_classes([MultiPartParser, FormParser])
+@permission_classes([IsAuthenticated])
+def profile_photo(request):
+    profile = get_profile(request.user)
+    if request.method == "POST":
+        upload = request.FILES.get("photo")
+        if not upload:
+            return Response({"error": "No photo received."}, status=400)
+        if upload.size > 5 * 1024 * 1024:
+            return Response({"error": "That photo is too large."}, status=400)
+        if profile.photo:
+            profile.photo.delete(save=False)
+        profile.photo = upload
+        profile.save()
+    else:
+        if profile.photo:
+            profile.photo.delete(save=False)
+        profile.photo = None
+        profile.use_google_photo = False
+        profile.save()
+    return Response(user_data(request.user))

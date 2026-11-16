@@ -82,3 +82,14 @@ class ToEatItem(models.Model):
 
     def __str__(self):
         return self.restaurant
+
+class Profile(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    photo = models.ImageField(upload_to="profiles/", null=True, blank=True)
+    google_photo = models.URLField(max_length=500, blank=True)
+    use_google_photo = models.BooleanField(default=True)
+
+@receiver(post_delete, sender=Profile)
+def delete_profile_photo(sender, instance, **kwargs):
+    if instance.photo:
+        instance.photo.delete(save=False)
