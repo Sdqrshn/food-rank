@@ -1,5 +1,4 @@
 from urllib.parse import quote
-
 from rest_framework import serializers
 from .models import Category, Dish, RankHistory, ToEatItem
 
