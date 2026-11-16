@@ -1,6 +1,3 @@
-from django.contrib.auth import password_validation
-from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError as DjangoValidationError
 from urllib.parse import quote
 
 from rest_framework import serializers
