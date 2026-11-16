@@ -10,13 +10,16 @@ from .serializers import (
 )
 from rest_framework import viewsets
 from rest_framework.authtoken.models import Token
-from rest_framework.decorators import api_view, action, permission_classes, parser_classes
+from rest_framework.decorators import api_view, action, permission_classes, parser_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.throttling import AnonRateThrottle
 from . import placing
 import os
 import requests
+import uuid
+from datetime import timedelta
 from django.utils import timezone
 from urllib.parse import quote
 from google.auth.transport import requests as google_requests
@@ -157,15 +160,15 @@ def photo_url(profile):
         return profile.google_photo
     return None
 
-
 def user_data(user):
     profile = get_profile(user)
     return {
         "id": user.id,
-        "email": user.username,
+        "email": "" if profile.is_guest else user.username,
         "display_name": user.first_name,
         "photo": photo_url(profile),
         "welcomed": profile.welcomed,
+        "is_guest": profile.is_guest,
     }
 
 @api_view(["GET", "PATCH"])
@@ -182,7 +185,10 @@ def me(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def logout_view(request):
-    Token.objects.filter(user=request.user).delete()
+    if get_profile(request.user).is_guest:
+        request.user.delete()
+    else:
+        Token.objects.filter(user=request.user).delete()
     return Response({"ok": True})
 
 
@@ -261,6 +267,9 @@ def place_suggestions(request):
         if seen:
             return Response(list(seen.values())[:5])
 
+    if get_profile(request.user).is_guest:
+        return Response([])
+
     key = os.environ.get("GOOGLE_PLACES_API_KEY")
     if not key or not allow_lookup():
         return Response([])
@@ -338,18 +347,41 @@ def google_login(request):
     if not email or not info.get("email_verified"):
         return Response({"error": "Your Google email isn't verified."}, status=400)
 
-    user = User.objects.filter(username=email).first() or User.objects.filter(email__iexact=email).first()
-    created = False
-    if user is None:
-        name = (info.get("name") or email.split("@")[0]).strip()[:50]
-        user = User.objects.create_user(username=email, email=email, first_name=name)
-        created = True
-    if not user.is_active:
+    existing = User.objects.filter(username=email).first() or User.objects.filter(email__iexact=email).first()
+    if existing is not None and not existing.is_active:
         return Response({"error": "This account is disabled."}, status=400)
 
+    guest_user = None
+    guest_key = request.data.get("guest_token")
+    if guest_key:
+        guest_token = Token.objects.filter(key=guest_key).select_related("user").first()
+        if guest_token and get_profile(guest_token.user).is_guest:
+            guest_user = guest_token.user
+
+    name = (info.get("name") or email.split("@")[0]).strip()[:50]
+    is_new = False
+
+    if existing is None and guest_user is not None:
+        user = guest_user
+        user.username = email
+        user.email = email
+        if user.first_name in ("", "Guest"):
+            user.first_name = name
+        user.save()
+        is_new = True
+    elif existing is None:
+        user = User.objects.create_user(username=email, email=email, first_name=name)
+        is_new = True
+    else:
+        user = existing
+        if guest_user is not None and guest_user.pk != user.pk:
+            guest_user.delete()
+
     profile = get_profile(user)
-    if created:
+    if is_new:
+        profile.is_guest = False
         profile.welcomed = False
+        profile.use_google_photo = True
     picture = (info.get("picture") or "").replace("=s96-c", "=s256-c")
     if picture:
         profile.google_photo = picture
@@ -415,3 +447,31 @@ def welcome_done(request):
     profile.welcomed = True
     profile.save(update_fields=["welcomed"])
     return Response(user_data(request.user))
+
+MAX_GUESTS = 300
+GUEST_LIFETIME_DAYS = 30
+
+
+class GuestThrottle(AnonRateThrottle):
+    scope = "guest"
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@throttle_classes([GuestThrottle])
+def guest_login(request):
+    cutoff = timezone.now() - timedelta(days=GUEST_LIFETIME_DAYS)
+    for old in User.objects.filter(profile__is_guest=True, date_joined__lt=cutoff)[:20]:
+        old.delete()
+    if Profile.objects.filter(is_guest=True).count() >= MAX_GUESTS:
+        return Response(
+            {"error": "Guest mode is busy right now. Try again later, or sign in with Google."}, status=503
+        )
+    user = User.objects.create_user(username=f"guest-{uuid.uuid4().hex[:16]}", first_name="Guest")
+    profile = get_profile(user)
+    profile.is_guest = True
+    profile.welcomed = True
+    profile.use_google_photo = False
+    profile.save()
+    token, _ = Token.objects.get_or_create(user=user)
+    return Response({"token": token.key, "user": user_data(user)}, status=201)
